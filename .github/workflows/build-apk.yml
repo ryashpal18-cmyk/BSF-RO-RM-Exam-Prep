@@ -1,0 +1,117 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install web dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Capacitor Android platform (if not already present)
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Generate release keystore (self-contained, auto-created on first run)
+        working-directory: android
+        run: |
+          KEYSTORE_PATH="app/release.keystore"
+          if [ ! -f "$KEYSTORE_PATH" ]; then
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -alias bsfrorm \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass bsfrorm123 -keypass bsfrorm123 \
+              -dname "CN=BSF RO/RM Exam Prep, OU=Dev, O=Self, L=NA, S=NA, C=IN"
+          fi
+
+      - name: Configure release signing
+        working-directory: android/app
+        run: |
+          cat >> ../gradle.properties << 'EOF'
+          RELEASE_STORE_FILE=release.keystore
+          RELEASE_STORE_PASSWORD=bsfrorm123
+          RELEASE_KEY_ALIAS=bsfrorm
+          RELEASE_KEY_PASSWORD=bsfrorm123
+          EOF
+
+      - name: Patch build.gradle for release signing (idempotent)
+        working-directory: android/app
+        run: |
+          if ! grep -q "RELEASE_STORE_FILE" build.gradle; then
+            python3 - << 'PYEOF'
+import re
+with open('build.gradle') as f:
+    content = f.read()
+
+signing_config = """
+    signingConfigs {
+        release {
+            storeFile file(RELEASE_STORE_FILE)
+            storePassword RELEASE_STORE_PASSWORD
+            keyAlias RELEASE_KEY_ALIAS
+            keyPassword RELEASE_KEY_PASSWORD
+        }
+    }
+"""
+
+content = content.replace(
+    "android {",
+    "android {\n" + signing_config,
+    1
+)
+content = content.replace(
+    "buildTypes {\n        release {",
+    "buildTypes {\n        release {\n            signingConfig signingConfigs.release",
+    1
+)
+
+with open('build.gradle', 'w') as f:
+    f.write(content)
+PYEOF
+          fi
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bsf-ro-rm-exam-prep-apk
+          path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Create GitHub Release with APK
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: BSF RO/RM Exam Prep — Build ${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
