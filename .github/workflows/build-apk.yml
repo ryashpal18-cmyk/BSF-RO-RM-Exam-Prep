@@ -39,6 +39,12 @@ jobs:
           fi
           npx cap sync android
 
+      - name: Generate native Android launcher icon from assets/logo.png
+        run: |
+          npx @capacitor/assets generate --android \
+            --iconBackgroundColor '#f5f5f0' \
+            --iconBackgroundColorDark '#153d2d'
+
       - name: Generate release keystore (self-contained, auto-created on first run)
         working-directory: android
         run: |
