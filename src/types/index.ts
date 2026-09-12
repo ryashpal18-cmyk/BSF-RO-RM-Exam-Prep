@@ -189,6 +189,7 @@ export interface MockTestAttempt {
   remainingSeconds: number;
   currentIndex: number;
   status: 'in_progress' | 'submitted' | 'abandoned';
+  generating?: boolean; // true while more AI questions are still being fetched in the background
 }
 
 export interface MockTestResult {
@@ -265,5 +266,5 @@ export interface AppSettings {
   autoSaveTest: boolean;
   showAnswerImmediately: boolean;
   geminiApiKey?: string; // stored locally on-device only, used to call Gemini API for AI Mock Tests
-  geminiModel?: string; // e.g. "gemini-2.5-flash"
+  geminiModel?: string; // e.g. "gemini-3.6-flash"
 }
