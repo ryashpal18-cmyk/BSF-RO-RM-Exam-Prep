@@ -79,7 +79,8 @@ export interface Question {
   marks: number;
   negativeMarks: number;
   sourceYear?: string;
-  isSample: true; // all bundled questions are demo/sample questions
+  isSample: boolean; // true for bundled demo/sample questions
+  aiGenerated?: boolean; // true for questions generated via Gemini
 }
 
 // Mutable per-question stats, kept separate from static question content
@@ -173,7 +174,7 @@ export interface MockTestResponse {
   timeSpentSeconds: number;
 }
 
-export type MockTestType = 'full' | 'subject';
+export type MockTestType = 'full' | 'subject' | 'ai';
 
 export interface MockTestAttempt {
   id: string;
@@ -216,6 +217,19 @@ export interface MockTestResult {
   createdAt: string;
 }
 
+// ==================== Fixed (Saved) AI Mock Tests ====================
+// A "Fixed Mock Test" is an AI-generated question set the user has chosen to
+// save permanently (via the "Fix Mock" option), so it can be retaken later
+// without calling the Gemini API again.
+export interface FixedMockTest {
+  id: string;
+  title: string;
+  createdAt: string;
+  language: Language;
+  config: MockTestConfig;
+  questionIds: string[];
+}
+
 // ==================== Study Activity / Streak ====================
 export interface StudyActivityDay {
   date: string; // YYYY-MM-DD, primary key
@@ -250,4 +264,6 @@ export interface AppSettings {
   soundEnabled: boolean;
   autoSaveTest: boolean;
   showAnswerImmediately: boolean;
+  geminiApiKey?: string; // stored locally on-device only, used to call Gemini API for AI Mock Tests
+  geminiModel?: string; // e.g. "gemini-2.5-flash"
 }
