@@ -206,19 +206,41 @@ async function generateSubjectQuestions(
  * official exam pattern, and across all syllabus topics within each subject.
  */
 export async function generateAiMockQuestions(apiKey: string, model: string): Promise<Question[]> {
+  return generateAiMockQuestionsStreaming(apiKey, model, () => {});
+}
+
+const CHUNK_SIZE = 10;
+
+/**
+ * Same as generateAiMockQuestions, but generates in small batches (10 questions
+ * at a time) and invokes onBatch after each batch is ready, so the caller can
+ * let the user start the test as soon as the first batch is ready while the
+ * rest keep generating in the background.
+ */
+export async function generateAiMockQuestionsStreaming(
+  apiKey: string,
+  model: string,
+  onBatch: (batch: Question[], totalGeneratedSoFar: number) => void | Promise<void>
+): Promise<Question[]> {
   if (!apiKey.trim()) {
     throw new GeminiMockGenerationError('No Gemini API key set. Add one in Settings first.');
   }
-  const resolvedModel = model.trim() || 'gemini-2.5-flash';
+  const resolvedModel = model.trim() || 'gemini-3.6-flash';
 
   const all: Question[] = [];
   for (const subject of SUBJECTS) {
-    try {
-      const qs = await generateSubjectQuestions(apiKey, resolvedModel, subject.id, subject.totalQuestions);
-      all.push(...qs);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new GeminiMockGenerationError(`${subject.title.en}: ${msg}`);
+    let remaining = subject.totalQuestions;
+    while (remaining > 0) {
+      const size = Math.min(CHUNK_SIZE, remaining);
+      try {
+        const batch = await generateSubjectQuestions(apiKey, resolvedModel, subject.id, size);
+        all.push(...batch);
+        remaining -= size;
+        await onBatch(batch, all.length);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new GeminiMockGenerationError(`${subject.title.en}: ${msg}`);
+      }
     }
   }
 

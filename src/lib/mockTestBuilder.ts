@@ -74,7 +74,8 @@ async function persistNewAttempt(
   config: MockTestConfig,
   questionIds: string[],
   language: Language,
-  subjectId?: SubjectId
+  subjectId?: SubjectId,
+  generating = false
 ): Promise<MockTestAttempt> {
   const attempt: MockTestAttempt = {
     id: generateId('mock'),
@@ -94,7 +95,8 @@ async function persistNewAttempt(
     submittedAt: null,
     remainingSeconds: config.durationMinutes * 60,
     currentIndex: 0,
-    status: 'in_progress'
+    status: 'in_progress',
+    generating
   };
   await db.mockTestAttempts.put(attempt);
   return attempt;
@@ -123,16 +125,19 @@ export function buildAiMockConfig(questions: Question[]): MockTestConfig {
 }
 
 /** Persists AI-generated questions into the question bank so scoring/bookmarks/stats work normally. */
-async function persistAiQuestions(questions: Question[]): Promise<void> {
+export async function persistAiQuestions(questions: Question[]): Promise<void> {
   await db.questionBank.bulkPut(questions);
   await ensureStatsForQuestions(questions.map((q) => q.id));
 }
 
-/** Starts a live attempt from a freshly-generated (not necessarily saved) AI question set. */
+/** Starts a live attempt from a freshly-generated (not necessarily saved) AI question set.
+ *  Pass generating=true if more questions are still being fetched in the background — the
+ *  Runner screen will then keep polling and appending them live. */
 export async function createAiMockAttempt(
   questions: Question[],
   language: Language,
-  config?: MockTestConfig
+  config?: MockTestConfig,
+  generating = false
 ): Promise<MockTestAttempt> {
   await persistAiQuestions(questions);
   const resolvedConfig = config ?? buildAiMockConfig(questions);
@@ -140,8 +145,53 @@ export async function createAiMockAttempt(
     'ai',
     resolvedConfig,
     questions.map((q) => q.id),
-    language
+    language,
+    undefined,
+    generating
   );
+}
+
+/** Appends a newly-generated batch of AI questions to an already-started attempt (used while
+ *  the rest of the AI mock test is still generating in the background). */
+export async function appendQuestionsToAttempt(attemptId: string, newQuestions: Question[]): Promise<MockTestAttempt | undefined> {
+  if (newQuestions.length === 0) return db.mockTestAttempts.get(attemptId);
+  await persistAiQuestions(newQuestions);
+  const attempt = await db.mockTestAttempts.get(attemptId);
+  if (!attempt) return undefined;
+
+  const newIds = newQuestions.map((q) => q.id);
+  const updated: MockTestAttempt = {
+    ...attempt,
+    questionIds: [...attempt.questionIds, ...newIds],
+    responses: [
+      ...attempt.responses,
+      ...newQuestions.map((q) => ({
+        questionId: q.id,
+        selectedIndex: null,
+        markedForReview: false,
+        visited: false,
+        timeSpentSeconds: 0
+      }))
+    ],
+    config: {
+      ...attempt.config,
+      totalQuestions: attempt.config.totalQuestions + newQuestions.length,
+      totalMarks: attempt.config.totalMarks + newQuestions.reduce((sum, q) => sum + q.marks, 0),
+      subjectDistribution: attempt.config.subjectDistribution.map((d) => {
+        const add = newQuestions.filter((q) => q.subjectId === d.subjectId);
+        return add.length
+          ? { ...d, questions: d.questions + add.length, marks: d.marks + add.reduce((sum, q) => sum + q.marks, 0) }
+          : d;
+      })
+    }
+  };
+  await db.mockTestAttempts.put(updated);
+  return updated;
+}
+
+/** Marks an attempt as no longer receiving background-generated questions. */
+export async function markAttemptGenerationDone(attemptId: string): Promise<void> {
+  await db.mockTestAttempts.update(attemptId, { generating: false });
 }
 
 /** Starts a new attempt re-using the question set from a previously "Fixed" (saved) AI mock test. */
@@ -168,6 +218,31 @@ export async function saveFixedMockTest(
   };
   await db.fixedMockTests.put(fixed);
   return fixed;
+}
+
+/** Appends a newly-generated batch of AI questions into an already-saved Fixed Mock Test. */
+export async function appendQuestionsToFixed(fixedId: string, newQuestions: Question[]): Promise<FixedMockTest | undefined> {
+  if (newQuestions.length === 0) return db.fixedMockTests.get(fixedId);
+  await persistAiQuestions(newQuestions);
+  const fixed = await db.fixedMockTests.get(fixedId);
+  if (!fixed) return undefined;
+  const updated: FixedMockTest = {
+    ...fixed,
+    questionIds: [...fixed.questionIds, ...newQuestions.map((q) => q.id)],
+    config: {
+      ...fixed.config,
+      totalQuestions: fixed.config.totalQuestions + newQuestions.length,
+      totalMarks: fixed.config.totalMarks + newQuestions.reduce((sum, q) => sum + q.marks, 0),
+      subjectDistribution: fixed.config.subjectDistribution.map((d) => {
+        const add = newQuestions.filter((q) => q.subjectId === d.subjectId);
+        return add.length
+          ? { ...d, questions: d.questions + add.length, marks: d.marks + add.reduce((sum, q) => sum + q.marks, 0) }
+          : d;
+      })
+    }
+  };
+  await db.fixedMockTests.put(updated);
+  return updated;
 }
 
 export async function getAllFixedMockTests(): Promise<FixedMockTest[]> {
