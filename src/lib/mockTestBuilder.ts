@@ -1,8 +1,16 @@
-import { db } from '@/db/db';
+import { db, ensureStatsForQuestions } from '@/db/db';
 import { generateId } from './id';
 import { EXAM_CONFIG, SUBJECTS } from '@/data/examConfig';
 import { ALL_QUESTIONS } from '@/data/questions';
-import type { Language, MockTestAttempt, MockTestConfig, MockTestType, SubjectId } from '@/types';
+import type {
+  FixedMockTest,
+  Language,
+  MockTestAttempt,
+  MockTestConfig,
+  MockTestType,
+  Question,
+  SubjectId
+} from '@/types';
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -94,4 +102,79 @@ async function persistNewAttempt(
 
 export async function getInProgressAttempt(): Promise<MockTestAttempt | undefined> {
   return db.mockTestAttempts.where('status').equals('in_progress').first();
+}
+
+// ==================== AI Mock Test (Gemini-generated) ====================
+
+/** Builds the MockTestConfig for a freshly-generated set of AI questions. */
+export function buildAiMockConfig(questions: Question[]): MockTestConfig {
+  const totalMarks = questions.reduce((sum, q) => sum + q.marks, 0);
+  return {
+    totalQuestions: questions.length,
+    totalMarks,
+    durationMinutes: EXAM_CONFIG.durationMinutes,
+    correctMarks: EXAM_CONFIG.correctMarks,
+    wrongMarks: EXAM_CONFIG.wrongMarks,
+    subjectDistribution: SUBJECTS.map((s) => {
+      const qs = questions.filter((q) => q.subjectId === s.id);
+      return { subjectId: s.id, questions: qs.length, marks: qs.reduce((sum, q) => sum + q.marks, 0) };
+    })
+  };
+}
+
+/** Persists AI-generated questions into the question bank so scoring/bookmarks/stats work normally. */
+async function persistAiQuestions(questions: Question[]): Promise<void> {
+  await db.questionBank.bulkPut(questions);
+  await ensureStatsForQuestions(questions.map((q) => q.id));
+}
+
+/** Starts a live attempt from a freshly-generated (not necessarily saved) AI question set. */
+export async function createAiMockAttempt(
+  questions: Question[],
+  language: Language,
+  config?: MockTestConfig
+): Promise<MockTestAttempt> {
+  await persistAiQuestions(questions);
+  const resolvedConfig = config ?? buildAiMockConfig(questions);
+  return persistNewAttempt(
+    'ai',
+    resolvedConfig,
+    questions.map((q) => q.id),
+    language
+  );
+}
+
+/** Starts a new attempt re-using the question set from a previously "Fixed" (saved) AI mock test. */
+export async function createAttemptFromFixed(fixed: FixedMockTest): Promise<MockTestAttempt> {
+  return persistNewAttempt('ai', fixed.config, fixed.questionIds, fixed.language);
+}
+
+// ==================== Fixed (saved) AI Mock Tests ====================
+
+export async function saveFixedMockTest(
+  title: string,
+  language: Language,
+  questions: Question[],
+  config?: MockTestConfig
+): Promise<FixedMockTest> {
+  await persistAiQuestions(questions);
+  const fixed: FixedMockTest = {
+    id: generateId('fixed'),
+    title,
+    createdAt: new Date().toISOString(),
+    language,
+    config: config ?? buildAiMockConfig(questions),
+    questionIds: questions.map((q) => q.id)
+  };
+  await db.fixedMockTests.put(fixed);
+  return fixed;
+}
+
+export async function getAllFixedMockTests(): Promise<FixedMockTest[]> {
+  const rows = await db.fixedMockTests.toArray();
+  return rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+export async function deleteFixedMockTest(id: string): Promise<void> {
+  await db.fixedMockTests.delete(id);
 }
