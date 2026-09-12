@@ -104,6 +104,38 @@ export default function Settings() {
       </Card>
 
       <Card className="space-y-3">
+        <p className="font-bold text-sm">AI Mock Test (Gemini)</p>
+        <p className="text-xs text-muted -mt-2">
+          Add your own Google Gemini API key to generate a fresh 100-question AI mock test, covering
+          every subject and topic in the syllabus. Get a free key at{' '}
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">
+            aistudio.google.com/apikey
+          </a>
+          . The key is stored only on this device.
+        </p>
+        <div>
+          <label className="text-xs text-muted">Gemini API Key</label>
+          <input
+            type="password"
+            autoComplete="off"
+            value={settings.geminiApiKey ?? ''}
+            onChange={(e) => updateSettings({ geminiApiKey: e.target.value })}
+            placeholder="Paste your Gemini API key"
+            className="w-full border border-line dark:border-white/10 rounded-lg p-2.5 bg-transparent text-sm mt-1 font-mono"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted">Gemini Model</label>
+          <input
+            value={settings.geminiModel ?? 'gemini-2.5-flash'}
+            onChange={(e) => updateSettings({ geminiModel: e.target.value })}
+            placeholder="gemini-2.5-flash"
+            className="w-full border border-line dark:border-white/10 rounded-lg p-2.5 bg-transparent text-sm mt-1 font-mono"
+          />
+        </div>
+      </Card>
+
+      <Card className="space-y-3">
         <p className="font-bold text-sm">Practice & Test</p>
         <label className="flex items-center justify-between text-sm">
           Sound

@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '@/db/db';
-import { ALL_QUESTIONS } from '@/data/questions';
 import { getSubject } from '@/data/examConfig';
 import { calculateMockTestResult, paletteStateFor } from '@/lib/scoring';
 import { logStudyActivity } from '@/lib/progress';
@@ -30,6 +29,7 @@ export default function MockTestRunner() {
   const { attemptId } = useParams<{ attemptId: string }>();
   const navigate = useNavigate();
   const [attempt, setAttempt] = useState<MockTestAttempt | null>(null);
+  const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showLeaveWarning, setShowLeaveWarning] = useState(false);
@@ -45,6 +45,8 @@ export default function MockTestRunner() {
         return;
       }
       setAttempt(a);
+      const qs = (await db.questionBank.bulkGet(a.questionIds)).filter((q): q is Question => Boolean(q));
+      setQuestions(qs);
       setLoading(false);
       questionStartRef.current = Date.now();
     })();
@@ -89,11 +91,6 @@ export default function MockTestRunner() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [attempt?.status]);
-
-  const questions = useMemo<Question[]>(() => {
-    if (!attempt) return [];
-    return attempt.questionIds.map((id) => ALL_QUESTIONS.find((q) => q.id === id)!).filter(Boolean);
-  }, [attempt?.questionIds]);
 
   if (loading || !attempt) {
     return <div className="py-20 text-center text-muted">Loading test...</div>;
@@ -174,8 +171,12 @@ export default function MockTestRunner() {
     <div className="space-y-3 pb-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold leading-tight">{attempt.type === 'full' ? 'Full Mock Test' : `${subject?.title.en} Mock Test`}</h1>
-          <p className="text-[11px] text-muted">Auto-saved · Sample Questions</p>
+          <h1 className="text-lg font-bold leading-tight">
+            {attempt.type === 'full' ? 'Full Mock Test' : attempt.type === 'ai' ? 'AI Mock Test' : `${subject?.title.en} Mock Test`}
+          </h1>
+          <p className="text-[11px] text-muted">
+            {attempt.type === 'ai' ? 'Auto-saved · AI-Generated Questions' : 'Auto-saved · Sample Questions'}
+          </p>
         </div>
         <div className="font-extrabold text-xl" style={{ color: '#d42b2b' }}>
           {formatTime(attempt.remainingSeconds)}
