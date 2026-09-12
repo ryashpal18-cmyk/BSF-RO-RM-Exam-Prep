@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '@/db/db';
-import { getSubject } from '@/data/examConfig';
+import { getSubject, EXAM_CONFIG } from '@/data/examConfig';
 import { calculateMockTestResult, paletteStateFor } from '@/lib/scoring';
 import { logStudyActivity } from '@/lib/progress';
 import { Button } from '@/components/common/Button';
@@ -70,6 +70,36 @@ export default function MockTestRunner() {
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt?.id]);
+
+  // Poll for more AI questions arriving in the background (streaming AI Mock Test)
+  useEffect(() => {
+    if (!attempt?.id || !attempt.generating) return;
+    const poll = setInterval(async () => {
+      const latest = await db.mockTestAttempts.get(attempt.id);
+      if (!latest) return;
+      setAttempt((prev) => {
+        if (!prev) return prev;
+        if (latest.questionIds.length === prev.questionIds.length && latest.generating === prev.generating) {
+          return prev;
+        }
+        const newIds = latest.questionIds.slice(prev.questionIds.length);
+        if (newIds.length > 0) {
+          db.questionBank.bulkGet(newIds).then((rows) => {
+            const newQs = rows.filter((q): q is Question => Boolean(q));
+            setQuestions((prevQs) => [...prevQs, ...newQs]);
+          });
+        }
+        return {
+          ...prev,
+          questionIds: latest.questionIds,
+          responses: [...prev.responses, ...latest.responses.slice(prev.responses.length)],
+          config: latest.config,
+          generating: latest.generating
+        };
+      });
+    }, 3000);
+    return () => clearInterval(poll);
+  }, [attempt?.id, attempt?.generating, attempt?.questionIds.length]);
 
   // Auto-save every response
   const persist = (next: MockTestAttempt) => {
@@ -177,6 +207,11 @@ export default function MockTestRunner() {
           <p className="text-[11px] text-muted">
             {attempt.type === 'ai' ? 'Auto-saved · AI-Generated Questions' : 'Auto-saved · Sample Questions'}
           </p>
+          {attempt.generating && (
+            <p className="text-[11px] text-brand-accent font-medium">
+              ⏳ More questions loading... {questions.length}/{EXAM_CONFIG.totalQuestions}
+            </p>
+          )}
         </div>
         <div className="font-extrabold text-xl" style={{ color: '#d42b2b' }}>
           {formatTime(attempt.remainingSeconds)}
