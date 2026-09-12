@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type {
   AppSettings,
+  FixedMockTest,
   MockTestAttempt,
   MockTestResult,
   Note,
@@ -25,6 +26,7 @@ export class AppDatabase extends Dexie {
   mockTestAttempts!: Table<MockTestAttempt, string>;
   mockTestResults!: Table<MockTestResult, string>;
   studyActivity!: Table<StudyActivityDay, string>;
+  fixedMockTests!: Table<FixedMockTest, string>; // AI mock tests the user chose to "Fix" (save) for later
 
   constructor() {
     super('bsf_ro_rm_exam_prep_db');
@@ -39,6 +41,20 @@ export class AppDatabase extends Dexie {
       mockTestAttempts: 'id, status, startedAt, type',
       mockTestResults: 'attemptId, createdAt',
       studyActivity: 'date'
+    });
+    // v2: adds fixedMockTests store for saved/"Fixed" AI mock tests
+    this.version(2).stores({
+      userProfile: 'id',
+      appSettings: 'id',
+      topicProgress: 'topicId, status, confidence, bookmarked, nextRevisionAt',
+      questionStats: 'questionId, bookmarked, masteredWrong',
+      questionBank: 'id, subjectId, chapterId, topicId, difficulty',
+      notes: 'id, pinned, createdAt',
+      practiceSessions: 'id, startedAt, completedAt',
+      mockTestAttempts: 'id, status, startedAt, type',
+      mockTestResults: 'attemptId, createdAt',
+      studyActivity: 'date',
+      fixedMockTests: 'id, createdAt'
     });
   }
 }
@@ -73,7 +89,9 @@ export async function ensureSeeded(): Promise<void> {
       fontSize: 'medium',
       soundEnabled: true,
       autoSaveTest: true,
-      showAnswerImmediately: false
+      showAnswerImmediately: false,
+      geminiApiKey: '',
+      geminiModel: 'gemini-2.5-flash'
     };
     await db.appSettings.put(settings);
   }
